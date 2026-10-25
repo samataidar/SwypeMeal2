@@ -1,15 +1,17 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { QueueItem } from '../types';
-import { Clock, Trash2, GripVertical, ChefHat, Flame } from 'lucide-react';
+import { Clock, Trash2, ChefHat, Flame, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface RecipeQueueProps {
   queue: QueueItem[];
   onRemove: (recipeId: string) => void;
   onCook: (recipeId: string) => void;
   onClear: () => void;
+  onMoveUp: (recipeId: string) => void;
+  onMoveDown: (recipeId: string) => void;
 }
 
-export default function RecipeQueue({ queue, onRemove, onCook, onClear }: RecipeQueueProps) {
+export default function RecipeQueue({ queue, onRemove, onCook, onClear, onMoveUp, onMoveDown }: RecipeQueueProps) {
   const totalCalories = queue.reduce((sum, item) => sum + item.recipe.nutrition.calories, 0);
   const totalTime = queue.reduce((sum, item) => sum + item.recipe.time, 0);
   const totalProtein = queue.reduce((sum, item) => sum + item.recipe.nutrition.protein, 0);
@@ -98,15 +100,39 @@ export default function RecipeQueue({ queue, onRemove, onCook, onClear }: Recipe
                     {/* Actions */}
                     <div className="flex items-center gap-1">
                       <button
+                        onClick={() => onMoveUp(item.recipe.id)}
+                        disabled={index === 0}
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                          index === 0
+                            ? 'bg-white/5 text-gray-600 cursor-not-allowed'
+                            : 'bg-violet-500/20 text-violet-400 hover:bg-violet-500/30'
+                        }`}
+                        title="Переместить вверх"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        onClick={() => onMoveDown(item.recipe.id)}
+                        disabled={index === queue.length - 1}
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                          index === queue.length - 1
+                            ? 'bg-white/5 text-gray-600 cursor-not-allowed'
+                            : 'bg-violet-500/20 text-violet-400 hover:bg-violet-500/30'
+                        }`}
+                        title="Переместить вниз"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                      <button
                         onClick={() => onCook(item.recipe.id)}
-                        className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400 hover:bg-green-500/30 transition-colors"
+                        className="w-7 h-7 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400 hover:bg-green-500/30 transition-colors"
                         title="Начать готовить"
                       >
                         <ChefHat size={14} />
                       </button>
                       <button
                         onClick={() => onRemove(item.recipe.id)}
-                        className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center text-red-400 hover:bg-red-500/30 transition-colors"
+                        className="w-7 h-7 rounded-lg bg-red-500/20 flex items-center justify-center text-red-400 hover:bg-red-500/30 transition-colors"
                         title="Убрать из очереди"
                       >
                         <Trash2 size={14} />

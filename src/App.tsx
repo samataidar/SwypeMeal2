@@ -1,25 +1,62 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { recipes } from './data/recipes';
+import { recipes as initialRecipes, categories } from './data/recipes';
 import { Recipe, QueueItem, HistoryItem, TabType } from './types';
 import SwipeCard from './components/SwipeCard';
 import RecipeQueue from './components/RecipeQueue';
 import History from './components/History';
 import RecipeDetail from './components/RecipeDetail';
 import Onboarding from './components/Onboarding';
-import { Heart, X, List, History as HistoryIcon, RotateCcw, Sparkles, Info } from 'lucide-react';
+import AddRecipeForm from './components/AddRecipeForm';
+import { Heart, X, List, History as HistoryIcon, RotateCcw, Sparkles, Info, Plus, SkipForward } from 'lucide-react';
 
 function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('swipe');
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
-  const [showUndo, setShowUndo] = useState(false);
-  const [lastSwipedRecipe, setLastSwipedRecipe] = useState<Recipe | null>(null);
+  const [swipedRecipes, setSwipedRecipes] = useState<Set<string>>(new Set()); // Требование 5
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [showSplash, setShowSplash] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showAddRecipe, setShowAddRecipe] = useState(false);
+  const [userRecipes, setUserRecipes] = useState<Recipe[]>([]); // Пользовательские рецепты
+
+  // Объединяем базовые рецепты с пользовательскими (только одобренные)
+  const allRecipes = useMemo(() => {
+    const approvedUserRecipes = userRecipes.filter(r => r.moderationStatus === 'approved');
+    return [...initialRecipes, ...approvedUserRecipes];
+  }, [userRecipes]);
+
+  // Фильтруем рецепты для свайпа (требования 4 и 5)
+  const availableRecipes = useMemo(() => {
+    const queueRecipeIds = new Set(queue.map(q => q.recipe.id));
+    return allRecipes.filter(recipe => 
+      !queueRecipeIds.has(recipe.id) && 
+      !swipedRecipes.has(recipe.id)
+    );
+  }, [allRecipes, queue, swipedRecipes]);
+
+  // Перемешиваем доступные рецепты
+  const shuffledRecipes = useMemo(() => {
+    const shuffled = [...availableRecipes];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }, [availableRecipes]);
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Сбрасываем индекс если текущий рецепт больше недоступен
+  useEffect(() => {
+    if (currentIndex >= shuffledRecipes.length && shuffledRecipes.length > 0) {
+      setCurrentIndex(0);
+    }
+  }, [shuffledRecipes.length, currentIndex]);
+
+  const currentRecipe = shuffledRecipes[currentIndex];
+  const nextRecipe = shuffledRecipes[currentIndex + 1];
 
   // Splash screen & onboarding
   useEffect(() => {
@@ -38,88 +75,104 @@ function App() {
     localStorage.setItem('swypemeal_onboarding_seen', 'true');
   }, []);
 
-  // Shuffle recipes on first load
-  const shuffledRecipes = useMemo(() => {
-    const shuffled = [...recipes];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-  }, []);
+  // Обработка свайпа (требования 4, 5, 8)
+  const handleSwipe = useCallback((direction: 'left' | 'right' | 'up') => {
+    if (!currentRecipe) return;
 
-  const currentRecipe = shuffledRecipes[currentIndex % shuffledRecipes.length];
-  const nextRecipe = shuffledRecipes[(currentIndex + 1) % shuffledRecipes.length];
+    // Добавляем в историю просмотренных (требование 5)
+    setSwipedRecipes(prev => new Set(prev).add(currentRecipe.id));
 
-  const handleSwipe = useCallback((direction: 'left' | 'right') => {
-    const recipe = currentRecipe;
-    
-    setSwipeDirection(direction);
-    setLastSwipedRecipe(recipe);
-    setShowUndo(true);
-
-    // Add to history
+    // Добавляем в историю
     setHistory(prev => [{
-      recipe,
+      recipe: currentRecipe,
       action: direction === 'right' ? 'like' : 'dislike',
       timestamp: Date.now()
     }, ...prev]);
 
-    // If liked, add to queue
+    // Если лайк, добавляем в очередь (требование 3 - дубликаты запрещены)
     if (direction === 'right') {
       setQueue(prev => {
-        if (prev.find(q => q.recipe.id === recipe.id)) return prev;
+        // Проверяем, нет ли уже в очереди
+        if (prev.find(q => q.recipe.id === currentRecipe.id)) {
+          return prev;
+        }
+        // Добавляем в конец (FIFO - требование 1)
         return [...prev, {
-          recipe,
+          recipe: currentRecipe,
           addedAt: Date.now(),
           position: prev.length
         }];
       });
     }
 
-    // Move to next card
-    setTimeout(() => {
-      setCurrentIndex(prev => prev + 1);
-      setSwipeDirection(null);
-    }, 300);
-
-    // Hide undo after 5 seconds
-    setTimeout(() => {
-      setShowUndo(false);
-      setLastSwipedRecipe(null);
-    }, 5000);
+    // Переходим к следующему рецепту
+    setCurrentIndex(prev => prev + 1);
   }, [currentRecipe]);
 
-  const handleUndo = useCallback(() => {
-    if (lastSwipedRecipe) {
-      // Remove from history
-      setHistory(prev => prev.slice(1));
-      // If it was liked, remove from queue
-      setQueue(prev => prev.filter(q => q.recipe.id !== lastSwipedRecipe.id));
-      // Go back
-      setCurrentIndex(prev => prev - 1);
-      setShowUndo(false);
-      setLastSwipedRecipe(null);
-    }
-  }, [lastSwipedRecipe]);
-
-  const handleRemoveFromQueue = useCallback((recipeId: string) => {
-    setQueue(prev => prev.filter(item => item.recipe.id !== recipeId));
+  // Перемещение вверх в очереди (требование 2)
+  const handleMoveUp = useCallback((recipeId: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(q => q.recipe.id === recipeId);
+      if (index <= 0) return prev;
+      
+      const newQueue = [...prev];
+      [newQueue[index - 1], newQueue[index]] = [newQueue[index], newQueue[index - 1]];
+      
+      // Пересчитываем позиции (требование 6)
+      return newQueue.map((item, i) => ({ ...item, position: i }));
+    });
   }, []);
 
+  // Перемещение вниз в очереди (требование 2)
+  const handleMoveDown = useCallback((recipeId: string) => {
+    setQueue(prev => {
+      const index = prev.findIndex(q => q.recipe.id === recipeId);
+      if (index === -1 || index >= prev.length - 1) return prev;
+      
+      const newQueue = [...prev];
+      [newQueue[index], newQueue[index + 1]] = [newQueue[index + 1], newQueue[index]];
+      
+      // Пересчитываем позиции (требование 6)
+      return newQueue.map((item, i) => ({ ...item, position: i }));
+    });
+  }, []);
+
+  // Удаление из очереди (требование 6)
+  const handleRemoveFromQueue = useCallback((recipeId: string) => {
+    setQueue(prev => {
+      const newQueue = prev.filter(item => item.recipe.id !== recipeId);
+      // Пересчитываем позиции
+      return newQueue.map((item, i) => ({ ...item, position: i }));
+    });
+  }, []);
+
+  // Готовка = удаление из очереди + добавление в историю (требование 7)
   const handleCook = useCallback((recipeId: string) => {
-    const item = queue.find(i => i.recipe.id === recipeId);
-    if (item) {
+    setQueue(prev => {
+      const item = prev.find(q => q.recipe.id === recipeId);
+      if (!item) return prev;
+
+      // Добавляем в историю готовки
+      setHistory(historyPrev => [{
+        recipe: item.recipe,
+        action: 'like', // Готовка считается положительным действием
+        timestamp: Date.now()
+      }, ...historyPrev]);
+
       alert(`🍳 Начинаем готовить: ${item.recipe.title}!\n\n⏱ Время: ${item.recipe.time} мин\n🔥 Калории: ${item.recipe.nutrition.calories} ккал\n🥩 Белки: ${item.recipe.nutrition.protein}г`);
-    }
-  }, [queue]);
+
+      // Удаляем из очереди и пересчитываем позиции (требование 6, 7)
+      const newQueue = prev.filter(q => q.recipe.id !== recipeId);
+      return newQueue.map((q, i) => ({ ...q, position: i }));
+    });
+  }, []);
 
   const handleClearQueue = useCallback(() => {
     setQueue([]);
   }, []);
 
   const handleHistoryUndo = useCallback((recipeId: string) => {
-    const recipe = recipes.find(r => r.id === recipeId);
+    const recipe = allRecipes.find(r => r.id === recipeId);
     if (recipe) {
       setHistory(prev => prev.filter(h => h.recipe.id !== recipeId));
       setQueue(prev => {
@@ -131,7 +184,7 @@ function App() {
         }];
       });
     }
-  }, []);
+  }, [allRecipes]);
 
   const handleClearHistory = useCallback(() => {
     setHistory([]);
@@ -149,6 +202,21 @@ function App() {
       });
     }
   }, [selectedRecipe]);
+
+  // Добавление нового рецепта (требование 10)
+  const handleAddRecipe = useCallback((recipeData: Omit<Recipe, 'id' | 'moderationStatus' | 'createdBy'>) => {
+    const newRecipe: Recipe = {
+      ...recipeData,
+      id: `user_${Date.now()}`,
+      moderationStatus: 'pending',
+      createdBy: 'guest',
+    };
+    
+    setUserRecipes(prev => [...prev, newRecipe]);
+    
+    // В реальном приложении здесь был бы API запрос
+    console.log('New recipe submitted for moderation:', newRecipe);
+  }, []);
 
   const isInQueue = selectedRecipe ? queue.some(q => q.recipe.id === selectedRecipe.id) : false;
 
@@ -224,21 +292,14 @@ function App() {
             </h1>
           </div>
           
-          {/* Undo button */}
-          <AnimatePresence>
-            {showUndo && currentTab === 'swipe' && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                onClick={handleUndo}
-                className="flex items-center gap-1.5 bg-violet-500/20 text-violet-400 px-3 py-1.5 rounded-full text-xs font-medium border border-violet-500/30 hover:bg-violet-500/30 transition-colors"
-              >
-                <RotateCcw size={12} />
-                Отменить
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {/* Add recipe button */}
+          <button
+            onClick={() => setShowAddRecipe(true)}
+            className="flex items-center gap-1.5 bg-violet-500/20 text-violet-400 px-3 py-1.5 rounded-full text-xs font-medium border border-violet-500/30 hover:bg-violet-500/30 transition-colors"
+          >
+            <Plus size={12} />
+            Добавить
+          </button>
         </div>
       </header>
 
@@ -255,82 +316,99 @@ function App() {
             >
               {/* Card stack */}
               <div className="relative h-full max-h-[calc(100vh-200px)]">
-                {/* Background card (next) */}
-                <div className="absolute inset-0 scale-95 opacity-50 pointer-events-none">
-                  <SwipeCard
-                    recipe={nextRecipe}
-                    onSwipe={() => {}}
-                    isTop={false}
-                  />
-                </div>
-                
-                {/* Swipe animation overlay */}
-                <AnimatePresence>
-                  {swipeDirection && (
-                    <motion.div
-                      className="absolute inset-0 z-20"
-                      initial={{ opacity: 1 }}
-                      animate={{
-                        x: swipeDirection === 'right' ? 300 : -300,
-                        rotate: swipeDirection === 'right' ? 20 : -20,
-                        opacity: 0
-                      }}
-                      transition={{ duration: 0.3 }}
+                {shuffledRecipes.length === 0 ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                    <div className="text-6xl mb-4">🎉</div>
+                    <h3 className="text-xl font-bold text-white mb-2">Все рецепты просмотрены!</h3>
+                    <p className="text-gray-500 text-sm max-w-[250px] mb-4">
+                      Вы просмотрели все доступные рецепты. Добавьте новые или очистите историю.
+                    </p>
+                    <button
+                      onClick={() => setSwipedRecipes(new Set())}
+                      className="px-6 py-3 rounded-xl bg-violet-500/20 text-violet-400 font-medium text-sm border border-violet-500/30 hover:bg-violet-500/30 transition-colors"
                     >
-                      <SwipeCard
-                        recipe={currentRecipe}
-                        onSwipe={() => {}}
-                        isTop={false}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                      Начать заново
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Background card (next) */}
+                    {nextRecipe && (
+                      <div className="absolute inset-0 scale-95 opacity-50 pointer-events-none">
+                        <SwipeCard
+                          recipe={nextRecipe}
+                          onSwipe={() => {}}
+                          isTop={false}
+                        />
+                      </div>
+                    )}
 
-                {/* Top card */}
-                <div className="absolute inset-0">
-                  <SwipeCard
-                    key={currentIndex}
-                    recipe={currentRecipe}
-                    onSwipe={handleSwipe}
-                    isTop={true}
-                  />
-                </div>
+                    {/* Top card */}
+                    {currentRecipe && (
+                      <div className="absolute inset-0">
+                        <SwipeCard
+                          key={currentRecipe.id}
+                          recipe={currentRecipe}
+                          onSwipe={handleSwipe}
+                          isTop={true}
+                        />
+                      </div>
+                    )}
 
-                {/* Info button overlay */}
-                <button
-                  onClick={() => setSelectedRecipe(currentRecipe)}
-                  className="absolute bottom-4 right-4 z-30 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-colors border border-white/10"
-                >
-                  <Info size={18} />
-                </button>
+                    {/* Info button overlay */}
+                    {currentRecipe && (
+                      <button
+                        onClick={() => setSelectedRecipe(currentRecipe)}
+                        className="absolute bottom-4 right-4 z-30 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white transition-colors border border-white/10"
+                      >
+                        <Info size={18} />
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Action buttons */}
-              <div className="flex items-center justify-center gap-6 mt-4">
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => handleSwipe('left')}
-                  className="w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-500/40 flex items-center justify-center text-red-400 hover:bg-red-500/30 transition-colors shadow-lg shadow-red-500/10"
-                >
-                  <X size={28} />
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => handleSwipe('right')}
-                  className="w-16 h-16 rounded-full bg-green-500/20 border-2 border-green-500/40 flex items-center justify-center text-green-400 hover:bg-green-500/30 transition-colors shadow-lg shadow-green-500/10"
-                >
-                  <Heart size={28} />
-                </motion.button>
-              </div>
+              {shuffledRecipes.length > 0 && (
+                <div className="flex items-center justify-center gap-4 mt-4">
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => handleSwipe('left')}
+                    className="w-14 h-14 rounded-full bg-red-500/20 border-2 border-red-500/40 flex items-center justify-center text-red-400 hover:bg-red-500/30 transition-colors shadow-lg shadow-red-500/10"
+                  >
+                    <X size={24} />
+                  </motion.button>
+                  
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => handleSwipe('up')}
+                    className="w-12 h-12 rounded-full bg-gray-500/20 border-2 border-gray-500/40 flex items-center justify-center text-gray-400 hover:bg-gray-500/30 transition-colors shadow-lg shadow-gray-500/10"
+                    title="Пропустить"
+                  >
+                    <SkipForward size={20} />
+                  </motion.button>
+                  
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => handleSwipe('right')}
+                    className="w-14 h-14 rounded-full bg-green-500/20 border-2 border-green-500/40 flex items-center justify-center text-green-400 hover:bg-green-500/30 transition-colors shadow-lg shadow-green-500/10"
+                  >
+                    <Heart size={24} />
+                  </motion.button>
+                </div>
+              )}
 
               {/* Progress indicator */}
-              <div className="flex items-center justify-center mt-3 gap-1">
-                <span className="text-gray-500 text-xs">
-                  {currentIndex + 1} / {shuffledRecipes.length} рецептов
-                </span>
-              </div>
+              {shuffledRecipes.length > 0 && (
+                <div className="flex items-center justify-center mt-3 gap-1">
+                  <span className="text-gray-500 text-xs">
+                    {currentIndex + 1} / {shuffledRecipes.length} рецептов
+                  </span>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -347,6 +425,8 @@ function App() {
                 onRemove={handleRemoveFromQueue}
                 onCook={handleCook}
                 onClear={handleClearQueue}
+                onMoveUp={handleMoveUp}
+                onMoveDown={handleMoveDown}
               />
             </motion.div>
           )}
@@ -413,6 +493,13 @@ function App() {
       <Onboarding
         show={showOnboarding}
         onClose={handleCloseOnboarding}
+      />
+
+      {/* Add Recipe Form */}
+      <AddRecipeForm
+        show={showAddRecipe}
+        onClose={() => setShowAddRecipe(false)}
+        onSubmit={handleAddRecipe}
       />
     </div>
   );

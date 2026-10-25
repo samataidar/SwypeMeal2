@@ -4,15 +4,17 @@ import { Clock, Users, Flame, Beef, Wheat, Egg } from 'lucide-react';
 
 interface SwipeCardProps {
   recipe: Recipe;
-  onSwipe: (direction: 'left' | 'right') => void;
+  onSwipe: (direction: 'left' | 'right' | 'up') => void;
   isTop: boolean;
 }
 
 export default function SwipeCard({ recipe, onSwipe, isTop }: SwipeCardProps) {
   const x = useMotionValue(0);
+  const y = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-15, 15]);
   const likeOpacity = useTransform(x, [0, 100], [0, 1]);
   const nopeOpacity = useTransform(x, [-100, 0], [1, 0]);
+  const skipOpacity = useTransform(y, [-100, 0], [1, 0]);
 
   const handleDragEnd = (_: any, info: PanInfo) => {
     const threshold = 100;
@@ -20,6 +22,8 @@ export default function SwipeCard({ recipe, onSwipe, isTop }: SwipeCardProps) {
       onSwipe('right');
     } else if (info.offset.x < -threshold) {
       onSwipe('left');
+    } else if (info.offset.y < -threshold) {
+      onSwipe('up');
     }
   };
 
@@ -43,8 +47,8 @@ export default function SwipeCard({ recipe, onSwipe, isTop }: SwipeCardProps) {
   return (
     <motion.div
       className={`absolute inset-0 ${isTop ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
-      style={{ x: isTop ? x : 0, rotate: isTop ? rotate : 0, zIndex: isTop ? 10 : 1 }}
-      drag={isTop ? 'x' : false}
+      style={{ x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0, zIndex: isTop ? 10 : 1 }}
+      drag={isTop ? true : false}
       dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
       dragElastic={0.9}
       onDragEnd={handleDragEnd}
@@ -57,7 +61,7 @@ export default function SwipeCard({ recipe, onSwipe, isTop }: SwipeCardProps) {
         <div className={`relative h-48 bg-gradient-to-br ${gradientColors[gradientIndex]} flex items-center justify-center`}>
           <span className="text-8xl drop-shadow-lg">{recipe.image}</span>
           
-          {/* Like/Nope indicators */}
+          {/* Like/Nope/Skip indicators */}
           {isTop && (
             <>
               <motion.div
@@ -71,6 +75,12 @@ export default function SwipeCard({ recipe, onSwipe, isTop }: SwipeCardProps) {
                 style={{ opacity: nopeOpacity }}
               >
                 НЕТ 👎
+              </motion.div>
+              <motion.div
+                className="absolute top-6 left-1/2 -translate-x-1/2 bg-gray-500 text-white px-4 py-2 rounded-xl font-bold text-lg border-2 border-gray-400"
+                style={{ opacity: skipOpacity }}
+              >
+                ПРОПУСК ⏭️
               </motion.div>
             </>
           )}
