@@ -17,6 +17,8 @@ export interface Recipe {
   nutrition: NutritionInfo;
   ingredients: string[];
   tags: string[];
+  moderationStatus?: 'pending' | 'approved' | 'rejected';
+  createdBy?: string;
 }
 
 export interface QueueItem {
